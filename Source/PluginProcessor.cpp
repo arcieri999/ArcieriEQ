@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "License.h"
 
 EQProcessor::EQProcessor()
     : AudioProcessor (BusesProperties()
@@ -19,6 +20,8 @@ EQProcessor::EQProcessor()
     }
     pRange = apvts.getRawParameterValue ("range");
     pSolo  = apvts.getRawParameterValue ("solo");
+
+    licensed.store (License::isLicensed());
 }
 
 AudioProcessorValueTreeState::ParameterLayout EQProcessor::createLayout()
@@ -183,6 +186,8 @@ void EQProcessor::updateFilters()
 void EQProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
 {
     ScopedNoDenormals noDenormals;
+    if (! licensed.load())      // sin licencia: el audio pasa sin ecualizar
+        return;
     updateFilters();
 
     const int numCh = jmin (buffer.getNumChannels(), 2);

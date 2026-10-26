@@ -1,1 +1,4 @@
-
+#!/bin/bash
+# Quita el bloqueo de cuarentena del plugin instalado
+xattr -cr "/Library/Audio/Plug-Ins/VST3/Arcieri EQ.vst3" 2>/dev/null
+exit 0

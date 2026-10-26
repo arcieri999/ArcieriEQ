@@ -19,6 +19,10 @@ public:
         setColour (Slider::rotarySliderFillColourId, Pal::purple);
         setColour (Slider::rotarySliderOutlineColourId, Pal::grid);
         setColour (Slider::thumbColourId, Colours::white);
+        setColour (Slider::trackColourId, Pal::purple);
+        setColour (Slider::backgroundColourId, Pal::grid);
+        setColour (TextButton::buttonOnColourId, Pal::purple);
+        setColour (TextButton::textColourOnId, Colours::white);
         setColour (Slider::textBoxTextColourId, Pal::text);
         setColour (Slider::textBoxOutlineColourId, Colours::transparentBlack);
         setColour (Label::textColourId, Pal::text);
@@ -54,6 +58,7 @@ private:
 
     void timerCallback() override;
     void selectBand (int i);
+    void updateGainRanges();
     void addBandAt (Point<float> p);
     void removeBand (int i);
     void showNodeMenu (int i);
@@ -82,12 +87,15 @@ private:
     int dragging = -1;
 
     Slider freqS, gainS, qS, rangeS;
-    ComboBox typeBox;
-    TextButton addBtn { "+ Banda" }, delBtn { "Eliminar" };
-    Label freqL, gainL, qL, rangeL, typeL;
+    ComboBox typeBox, slopeBox;
+    TextButton addBtn { "+ Banda" }, delBtn { "Eliminar" }, soloBtn { "SOLO" };
+    Slider bandS[EQProcessor::maxBands];
+    Rectangle<int> sidePanel;
+    Label freqL, gainL, qL, rangeL, typeL, slopeL;
 
     std::unique_ptr<SA> aF, aG, aQ, aR;
-    std::unique_ptr<CA> aT;
+    std::unique_ptr<SA> aB[EQProcessor::maxBands];
+    std::unique_ptr<CA> aT, aS;
 
     static constexpr int fftOrder = 11;
     static constexpr int fftSize = 1 << fftOrder;

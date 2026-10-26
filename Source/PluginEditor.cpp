@@ -276,11 +276,11 @@ void EQEditor::resized()
     addBtn.setBounds (t.withTrimmedTop (20).removeFromTop (26).translated (0, 8).withWidth (70));
     delBtn.setBounds (addBtn.getBounds().translated (76, 0));
 
-    for (auto* pair : std::initializer_list<std::pair<Slider*, Label*>> { { &freqS, &freqL }, { &gainS, &gainL }, { &qS, &qL } })
+    for (const auto& pr : std::initializer_list<std::pair<Slider*, Label*>> { { &freqS, &freqL }, { &gainS, &gainL }, { &qS, &qL } })
     {
         auto a = knob (110);
-        pair.second->setBounds (a.removeFromTop (16).translated (0, -16));
-        pair.first->setBounds (a.translated (0, -6));
+        pr.second->setBounds (a.removeFromTop (16).translated (0, -16));
+        pr.first->setBounds (a.translated (0, -6));
     }
 
     auto rg = bottom.reduced (16, 6).removeFromRight (110);
@@ -398,7 +398,7 @@ void EQEditor::paint (Graphics& g)
     g.setFont (FontOptions (11.f));
     for (int k = -3; k <= 3; ++k)
     {
-        float db = k * range() / 3.f;
+        float db = (float) k * range() / 3.f;
         float y = gainToY (db);
         g.setColour (k == 0 ? Pal::deep : Pal::grid);
         g.drawHorizontalLine ((int) y, graph.getX(), graph.getRight());

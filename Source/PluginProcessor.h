@@ -10,6 +10,7 @@ public:
     static constexpr int maxBands = 8;
     static constexpr int initialBands = 4;
     static constexpr int scopeSize = 4096;
+    static constexpr int maxStages = 8;   // 8 biquads = 96 dB/oct
 
     enum FilterType { Peak = 0, LowShelf, HighShelf, LowPass, HighPass, Notch, BandPass };
 
@@ -42,6 +43,15 @@ public:
         return { "Peak", "Low Shelf", "High Shelf", "Low Pass", "High Pass", "Notch", "Band Pass" };
     }
 
+    static StringArray getSlopeNames()
+    {
+        return { "6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct", "72 dB/oct", "96 dB/oct" };
+    }
+
+    // Devuelve cuantas etapas (biquads) se necesitan; LP/HP usan la pendiente, el resto usa 1 etapa
+    static int makeStageCoeffs (int type, double sr, float freq, float q, float gainDb, int slope,
+                                dsp::IIR::Coefficients<float>::Ptr* out);
+
     static dsp::IIR::Coefficients<float>::Ptr makeCoeffs (int type, double sr, float freq, float q, float gainDb);
 
     double getSampleRateHz() const { return currentSR; }
@@ -56,18 +66,27 @@ private:
     static AudioProcessorValueTreeState::ParameterLayout createLayout();
     void updateFilters();
 
-    struct Cache { float f = -1.f, g = -999.f, q = -1.f; int t = -1; };
+    struct Cache { float f = -1.f, g = -999.f, q = -1.f; int t = -1; int s = -1; };
 
     std::atomic<float>* pOn[maxBands] {};
     std::atomic<float>* pF[maxBands] {};
     std::atomic<float>* pG[maxBands] {};
     std::atomic<float>* pQ[maxBands] {};
     std::atomic<float>* pT[maxBands] {};
+    std::atomic<float>* pS[maxBands] {};
     std::atomic<float>* pRange = nullptr;
+    std::atomic<float>* pSolo = nullptr;
 
     Cache cache[maxBands];
     bool active[maxBands] {};
-    dsp::IIR::Filter<float> filters[maxBands][2];
+    dsp::IIR::Filter<float> filters[maxBands][2][maxStages];
+    int numStages[maxBands] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+    bool soloUseBand = false;
+    int soloBand = 0;
+    dsp::IIR::Filter<float> soloFilters[2];
+    bool soloActive = false;
+    float soloF = -1.f, soloQ = -1.f;
+    int soloT = -1;
     double currentSR = 44100.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EQProcessor)

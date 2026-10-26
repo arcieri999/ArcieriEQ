@@ -15,8 +15,10 @@ EQProcessor::EQProcessor()
         pG[i]  = apvts.getRawParameterValue ("g" + n);
         pQ[i]  = apvts.getRawParameterValue ("q" + n);
         pT[i]  = apvts.getRawParameterValue ("t" + n);
+        pS[i]  = apvts.getRawParameterValue ("s" + n);
     }
     pRange = apvts.getRawParameterValue ("range");
+    pSolo  = apvts.getRawParameterValue ("solo");
 }
 
 AudioProcessorValueTreeState::ParameterLayout EQProcessor::createLayout()
@@ -38,12 +40,50 @@ AudioProcessorValueTreeState::ParameterLayout EQProcessor::createLayout()
                          NormalisableRange<float> (0.1f, 18.f, 0.01f, 0.4f), (defT[i] == Peak ? 1.0f : 0.71f)));
         p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { "t" + n, 1 }, "Band " + n + " Type",
                          getTypeNames(), defT[i]));
+        p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { "s" + n, 1 }, "Band " + n + " Slope",
+                         getSlopeNames(), 1));
     }
 
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { "range", 1 }, "Range (dB)",
                      NormalisableRange<float> (3.f, 48.f, 1.f), 18.f));
 
+    p.push_back (std::make_unique<AudioParameterInt> (ParameterID { "solo", 1 }, "Solo Band", 0, 8, 0));
+
     return { p.begin(), p.end() };
+}
+
+int EQProcessor::makeStageCoeffs (int type, double sr, float freq, float q, float gainDb, int slope,
+                                  dsp::IIR::Coefficients<float>::Ptr* out)
+{
+    using C = dsp::IIR::Coefficients<float>;
+
+    if (type != LowPass && type != HighPass)
+    {
+        out[0] = makeCoeffs (type, sr, freq, q, gainDb);
+        return 1;
+    }
+
+    static const int orders[8] = { 1, 2, 3, 4, 6, 8, 12, 16 };
+    const int order = orders[jlimit (0, 7, slope)];
+    const bool lp = (type == LowPass);
+    freq = jlimit (20.f, (float) (sr * 0.49), freq);
+
+    int n = 0;
+    if (order & 1)
+        out[n++] = lp ? C::makeFirstOrderLowPass (sr, freq) : C::makeFirstOrderHighPass (sr, freq);
+
+    const int pairs = order / 2;
+    for (int k = 0; k < pairs; ++k)
+    {
+        const float theta = (order & 1) ? (float) (k + 1) * MathConstants<float>::pi / (float) order
+                                        : (float) (2 * k + 1) * MathConstants<float>::pi / (float) (2 * order);
+        float qk = 1.0f / (2.0f * std::cos (theta));       // Butterworth
+        if (k == pairs - 1)
+            qk *= q / 0.7071f;                              // el Q del usuario actua como resonancia
+        qk = jmax (0.1f, qk);
+        out[n++] = lp ? C::makeLowPass (sr, freq, qk) : C::makeHighPass (sr, freq, qk);
+    }
+    return n;
 }
 
 dsp::IIR::Coefficients<float>::Ptr EQProcessor::makeCoeffs (int type, double sr, float freq, float q, float gainDb)
@@ -71,8 +111,10 @@ void EQProcessor::prepareToPlay (double sampleRate, int)
     for (int i = 0; i < maxBands; ++i)
     {
         cache[i] = Cache();
-        for (auto& f : filters[i]) f.reset();
+        for (auto& chn : filters[i]) for (auto& f : chn) f.reset();
     }
+    soloF = -1.f;
+    for (auto& f : soloFilters) f.reset();
     updateFilters();
 }
 
@@ -95,13 +137,45 @@ void EQProcessor::updateFilters()
         const float g = jlimit (-range, range, pG[i]->load());
         const float q = pQ[i]->load();
         const int   t = (int) pT[i]->load();
+        const int   s = (int) pS[i]->load();
 
-        if (f != cache[i].f || g != cache[i].g || q != cache[i].q || t != cache[i].t)
+        if (f != cache[i].f || g != cache[i].g || q != cache[i].q || t != cache[i].t || s != cache[i].s)
         {
-            cache[i] = { f, g, q, t };
-            auto c = makeCoeffs (t, currentSR, f, q, g);
-            filters[i][0].coefficients = c;
-            filters[i][1].coefficients = c;
+            cache[i] = { f, g, q, t, s };
+            dsp::IIR::Coefficients<float>::Ptr cs[maxStages];
+            const int cnt = makeStageCoeffs (t, currentSR, f, q, g, s, cs);
+            numStages[i] = cnt;
+            for (int k = 0; k < cnt; ++k)
+            {
+                filters[i][0][k].coefficients = cs[k];
+                filters[i][1][k].coefficients = cs[k];
+            }
+        }
+    }
+
+    // Solo: aisla la zona de frecuencias de una sola banda
+    const int sb = (int) pSolo->load() - 1;
+    soloActive = (sb >= 0 && sb < maxBands && active[sb]);
+    soloBand = jlimit (0, maxBands - 1, sb);
+    {
+        const int st = (int) pT[soloBand]->load();
+        soloUseBand = soloActive && (st == LowPass || st == HighPass);
+    }
+    if (soloActive && ! soloUseBand)
+    {
+        const float f = pF[sb]->load();
+        const float q = pQ[sb]->load();
+        const int   t = (int) pT[sb]->load();
+
+        if (f != soloF || q != soloQ || t != soloT)
+        {
+            soloF = f; soloQ = q; soloT = t;
+            int iso = BandPass;                              // Peak, Notch, Band Pass
+            if (t == LowShelf  || t == LowPass)  iso = LowPass;
+            if (t == HighShelf || t == HighPass) iso = HighPass;
+            auto c = makeCoeffs (iso, currentSR, f, q, 0.f);
+            soloFilters[0].coefficients = c;
+            soloFilters[1].coefficients = c;
         }
     }
 }
@@ -120,9 +194,21 @@ void EQProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
         for (int s = 0; s < n; ++s)
         {
             float x = d[s];
-            for (int b = 0; b < maxBands; ++b)
-                if (active[b])
-                    x = filters[b][ch].processSample (x);
+            if (soloActive)
+            {
+                if (soloUseBand)
+                    for (int k = 0; k < numStages[soloBand]; ++k)
+                        x = filters[soloBand][ch][k].processSample (x);
+                else
+                    x = soloFilters[ch].processSample (x);
+            }
+            else
+            {
+                for (int b = 0; b < maxBands; ++b)
+                    if (active[b])
+                        for (int k = 0; k < numStages[b]; ++k)
+                            x = filters[b][ch][k].processSample (x);
+            }
             d[s] = x;
         }
     }

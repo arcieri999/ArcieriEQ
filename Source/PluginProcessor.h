@@ -56,6 +56,9 @@ public:
 
     double getSampleRateHz() const { return currentSR; }
 
+    bool isLicensed() const { return licensed.load(); }
+    void setLicensed (bool b) { licensed.store (b); }
+
     AudioProcessorValueTreeState apvts;
 
     // Buffer circular (post-EQ) para el analizador de espectro
@@ -88,6 +91,7 @@ private:
     float soloF = -1.f, soloQ = -1.f;
     int soloT = -1;
     double currentSR = 44100.0;
+    std::atomic<bool> licensed { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EQProcessor)
 };

@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include <BinaryData.h>
+#include "License.h"
 
 static const float minF = 20.f, maxF = 20000.f;
 
@@ -80,6 +81,20 @@ EQEditor::EQEditor (EQProcessor& p) : AudioProcessorEditor (&p), proc (p)
 
     selectBand (0);
     startTimerHz (30);
+
+    if (! proc.isLicensed())
+    {
+        auto safe = Component::SafePointer<EQEditor> (this);
+        activation = std::make_unique<ActivationPanel> (proc, logo, [safe]
+        {
+            MessageManager::callAsync ([safe]
+            {
+                if (safe != nullptr) { safe->activation.reset(); safe->repaint(); }
+            });
+        });
+        addAndMakeVisible (*activation);
+        activation->setBounds (getLocalBounds());
+    }
 }
 
 EQEditor::~EQEditor()
@@ -307,6 +322,8 @@ void EQEditor::timerCallback()
 // ------------------------------------------------------------------ drawing
 void EQEditor::resized()
 {
+    if (activation != nullptr) activation->setBounds (getLocalBounds());
+
     auto r = getLocalBounds();
     r.removeFromTop (64);
     auto bottom = r.removeFromBottom (140);
@@ -521,4 +538,78 @@ void EQEditor::paint (Graphics& g)
     g.setColour (Pal::purple);
     g.setFont (FontOptions (13.f, Font::bold));
     g.drawText ("BANDA " + String (selected + 1), 16, getHeight() - 140, 120, 18, Justification::centredLeft);
+}
+
+
+// ------------------------------------------------------------ Activacion
+ActivationPanel::ActivationPanel (EQProcessor& p, Image logoImg, std::function<void()> onOk)
+    : proc (p), logo (std::move (logoImg)), onActivated (std::move (onOk)), code (License::machineCode())
+{
+    keyBox.setMultiLine (true, true);
+    keyBox.setReturnKeyStartsNewLine (false);
+    keyBox.setTextToShowWhenEmpty ("Pega aquí tu licencia", Pal::text.withAlpha (0.4f));
+    keyBox.setColour (TextEditor::backgroundColourId, Pal::panel);
+    keyBox.setColour (TextEditor::textColourId, Pal::text);
+    keyBox.setColour (TextEditor::outlineColourId, Pal::deep);
+    keyBox.setColour (TextEditor::focusedOutlineColourId, Pal::purple);
+    addAndMakeVisible (keyBox);
+
+    activateBtn.setColour (TextButton::buttonColourId, Pal::deep);
+    activateBtn.setColour (TextButton::textColourOffId, Colours::white);
+    addAndMakeVisible (activateBtn);
+    addAndMakeVisible (copyBtn);
+
+    status.setJustificationType (Justification::centred);
+    status.setColour (Label::textColourId, Pal::text);
+    addAndMakeVisible (status);
+
+    copyBtn.onClick = [this]
+    {
+        SystemClipboard::copyTextToClipboard (code);
+        status.setText ("Código copiado. Envíaselo a Arcieri.", dontSendNotification);
+    };
+
+    activateBtn.onClick = [this]
+    {
+        if (License::activate (keyBox.getText()))
+        {
+            proc.setLicensed (true);
+            status.setText ("¡Activado!", dontSendNotification);
+            if (onActivated) onActivated();
+        }
+        else
+        {
+            status.setText ("Licencia inválida para este equipo. Revisa que la pegaste completa.", dontSendNotification);
+        }
+    };
+}
+
+void ActivationPanel::paint (Graphics& g)
+{
+    g.fillAll (Pal::bg);
+    auto c = area();
+
+    g.drawImageWithin (logo, c.getCentreX() - 50, c.getY(), 100, 100, RectanglePlacement::centred);
+
+    g.setColour (Pal::text);
+    g.setFont (FontOptions (26.f, Font::bold));
+    g.drawText ("ARCIERI EQ", c.getX(), c.getY() + 104, c.getWidth(), 34, Justification::centred);
+
+    g.setFont (FontOptions (14.f));
+    g.setColour (Pal::text.withAlpha (0.75f));
+    g.drawText ("Activa tu copia. Envía este código de equipo a Arcieri para recibir tu licencia:",
+                c.getX(), c.getY() + 146, c.getWidth(), 20, Justification::centred);
+
+    g.setColour (Pal::purple);
+    g.setFont (FontOptions (28.f, Font::bold));
+    g.drawText (code, c.getX(), c.getY() + 172, c.getWidth(), 40, Justification::centred);
+}
+
+void ActivationPanel::resized()
+{
+    auto c = area();
+    copyBtn.setBounds (c.getCentreX() - 70, c.getY() + 216, 140, 28);
+    keyBox.setBounds (c.getX(), c.getY() + 256, c.getWidth(), 80);
+    activateBtn.setBounds (c.getCentreX() - 80, c.getY() + 348, 160, 34);
+    status.setBounds (c.getX(), c.getY() + 392, c.getWidth(), 24);
 }

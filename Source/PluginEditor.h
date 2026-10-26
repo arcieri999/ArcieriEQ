@@ -38,6 +38,25 @@ public:
     }
 };
 
+class ActivationPanel : public Component
+{
+public:
+    ActivationPanel (EQProcessor& p, Image logoImg, std::function<void()> onOk);
+    void paint (Graphics&) override;
+    void resized() override;
+
+private:
+    Rectangle<int> area() const { return getLocalBounds().withSizeKeepingCentre (640, 470); }
+
+    EQProcessor& proc;
+    Image logo;
+    std::function<void()> onActivated;
+    String code;
+    TextEditor keyBox;
+    TextButton activateBtn { "ACTIVAR" }, copyBtn { "Copiar código" };
+    Label status;
+};
+
 class EQEditor : public AudioProcessorEditor, private Timer
 {
 public:
@@ -80,6 +99,7 @@ private:
 
     EQProcessor& proc;
     PurpleLNF lnf;
+    std::unique_ptr<ActivationPanel> activation;
     Image logo;
     Rectangle<float> graph;
 

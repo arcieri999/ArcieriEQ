@@ -17,14 +17,36 @@ jobs:
       - name: Descargar JUCE
         run: git clone --depth 1 --branch 8.0.6 https://github.com/juce-framework/JUCE.git JUCE
 
-      - name: Configurar
+      - name: Configurar (macOS, Intel + Apple Silicon)
+        if: runner.os == 'macOS'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+
+      - name: Configurar (Windows)
+        if: runner.os == 'Windows'
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Compilar
         run: cmake --build build --config Release
 
-      - name: Subir VST3
+      - name: Crear instalador macOS (.pkg)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist pkgroot/Library/Audio/Plug-Ins/VST3
+          cp -R "build/ArcieriEQ_artefacts/Release/VST3/Arcieri EQ.vst3" pkgroot/Library/Audio/Plug-Ins/VST3/
+          xattr -cr pkgroot
+          codesign --force --deep -s - "pkgroot/Library/Audio/Plug-Ins/VST3/Arcieri EQ.vst3"
+          chmod +x installer/mac/scripts/postinstall
+          pkgbuild --root pkgroot --scripts installer/mac/scripts --identifier com.arcieri.eq --version 1.0.0 --install-location / ArcieriEQ-component.pkg
+          productbuild --package ArcieriEQ-component.pkg dist/ArcieriEQ-Installer-macOS.pkg
+
+      - name: Crear instalador Windows (.exe)
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\windows\ArcieriEQ.iss
+
+      - name: Subir instalador
         uses: actions/upload-artifact@v4
         with:
-          name: ArcieriEQ-${{ matrix.os }}
-          path: build/ArcieriEQ_artefacts/Release/VST3
+          name: Instalador-${{ matrix.os }}
+          path: dist

@@ -1,0 +1,30 @@
+name: Build Arcieri EQ
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descargar JUCE
+        run: git clone --depth 1 --branch 8.0.6 https://github.com/juce-framework/JUCE.git JUCE
+
+      - name: Configurar
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar
+        run: cmake --build build --config Release
+
+      - name: Subir VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArcieriEQ-${{ matrix.os }}
+          path: build/ArcieriEQ_artefacts/Release/VST3

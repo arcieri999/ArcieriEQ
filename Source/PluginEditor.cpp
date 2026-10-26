@@ -6,7 +6,7 @@ static const float minF = 20.f, maxF = 20000.f;
 EQEditor::EQEditor (EQProcessor& p) : AudioProcessorEditor (&p), proc (p)
 {
     setLookAndFeel (&lnf);
-    setSize (940, 580);
+    setSize (1180, 580);
 
     logo = ImageCache::getFromMemory (BinaryData::logo_png, BinaryData::logo_pngSize);
 
@@ -34,8 +34,32 @@ EQEditor::EQEditor (EQProcessor& p) : AudioProcessorEditor (&p), proc (p)
     typeL.setJustificationType (Justification::centred);
     addAndMakeVisible (typeL);
 
+    slopeBox.addItemList (EQProcessor::getSlopeNames(), 1);
+    addAndMakeVisible (slopeBox);
+    slopeL.setText ("PENDIENTE", dontSendNotification);
+    slopeL.setJustificationType (Justification::centred);
+    addAndMakeVisible (slopeL);
+
     addAndMakeVisible (addBtn);
     addAndMakeVisible (delBtn);
+    addAndMakeVisible (soloBtn);
+    soloBtn.onClick = [this]
+    {
+        int cur = (int) getParam ("solo");
+        setParam ("solo", cur == selected + 1 ? 0.f : (float) (selected + 1));
+    };
+
+    for (int i = 0; i < EQProcessor::maxBands; ++i)
+    {
+        auto& sl = bandS[i];
+        sl.setSliderStyle (Slider::LinearVertical);
+        sl.setTextBoxStyle (Slider::TextBoxBelow, false, 36, 14);
+        sl.setNumDecimalPlacesToDisplay (1);
+        sl.setDoubleClickReturnValue (true, 0.0);
+        sl.onDragStart = [this, i] { selectBand (i); };
+        addAndMakeVisible (sl);
+        aB[i] = std::make_unique<SA> (proc.apvts, "g" + String (i + 1), sl);
+    }
     addBtn.onClick = [this]
     {
         for (int i = 0; i < EQProcessor::maxBands; ++i)
@@ -50,7 +74,7 @@ EQEditor::EQEditor (EQProcessor& p) : AudioProcessorEditor (&p), proc (p)
     aR = std::make_unique<SA> (proc.apvts, "range", rangeS);
     rangeS.onValueChange = [this]
     {
-        gainS.setRange (-range(), range(), 0.1);
+        updateGainRanges();
         repaint();
     };
 
@@ -85,32 +109,39 @@ void EQEditor::setParamGesture (const String& id, bool begin)
 
 float EQEditor::range() const { return getParam ("range"); }
 
-// Frecuencias altas a la IZQUIERDA, bajas a la DERECHA (como se pidió)
+// Frecuencias graves a la IZQUIERDA, agudas a la DERECHA
 float EQEditor::freqToX (float f) const
 {
     float p = std::log (jlimit (minF, maxF, f) / minF) / std::log (maxF / minF);
-    return graph.getRight() - p * graph.getWidth();
+    return graph.getX() + p * graph.getWidth();
 }
 
 float EQEditor::xToFreq (float x) const
 {
-    float p = jlimit (0.f, 1.f, (graph.getRight() - x) / graph.getWidth());
+    float p = jlimit (0.f, 1.f, (x - graph.getX()) / graph.getWidth());
     return minF * std::pow (maxF / minF, p);
 }
 
 float EQEditor::gainToY (float g) const { return graph.getCentreY() - (g / range()) * graph.getHeight() * 0.5f; }
 float EQEditor::yToGain (float y) const { return (graph.getCentreY() - y) / (graph.getHeight() * 0.5f) * range(); }
 
+void EQEditor::updateGainRanges()
+{
+    gainS.setRange (-range(), range(), 0.1);
+    for (auto& b : bandS) b.setRange (-range(), range(), 0.1);
+}
+
 void EQEditor::selectBand (int i)
 {
     selected = i;
     auto n = String (i + 1);
-    aF.reset(); aG.reset(); aQ.reset(); aT.reset();
+    aF.reset(); aG.reset(); aQ.reset(); aT.reset(); aS.reset();
     aF = std::make_unique<SA> (proc.apvts, "f" + n, freqS);
     aG = std::make_unique<SA> (proc.apvts, "g" + n, gainS);
     aQ = std::make_unique<SA> (proc.apvts, "q" + n, qS);
     aT = std::make_unique<CA> (proc.apvts, "t" + n, typeBox);
-    gainS.setRange (-range(), range(), 0.1);
+    aS = std::make_unique<CA> (proc.apvts, "s" + n, slopeBox);
+    updateGainRanges();
     repaint();
 }
 
@@ -125,6 +156,7 @@ void EQEditor::addBandAt (Point<float> p)
         setParam ("f" + n, xToFreq (p.x));
         setParam ("g" + n, jlimit (-range(), range(), yToGain (p.y)));
         setParam ("q" + n, 1.0f);
+        setParam ("s" + n, 1.f);
         selectBand (i);
         return;
     }
@@ -228,6 +260,22 @@ void EQEditor::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
 // ------------------------------------------------------------------- timer
 void EQEditor::timerCallback()
 {
+    soloBtn.setToggleState ((int) getParam ("solo") == selected + 1, dontSendNotification);
+    for (int i = 0; i < EQProcessor::maxBands; ++i)
+    {
+        bool on = isActive (i);
+        bool usesGain = (int) getParam ("t" + String (i + 1)) <= EQProcessor::HighShelf;
+        bandS[i].setEnabled (on && usesGain);
+        bandS[i].setAlpha (on ? 1.f : 0.35f);
+    }
+
+    {
+        const int selT = (int) getParam ("t" + String (selected + 1));
+        const bool lphp = (selT == EQProcessor::LowPass || selT == EQProcessor::HighPass);
+        slopeBox.setEnabled (lphp);
+        slopeBox.setAlpha (lphp ? 1.f : 0.35f);
+    }
+
     const int pos = proc.scopePos.load (std::memory_order_relaxed);
     for (int i = 0; i < fftSize; ++i)
         fftData[i] = proc.scopeBuf[(pos - fftSize + i + EQProcessor::scopeSize) & (EQProcessor::scopeSize - 1)];
@@ -262,21 +310,34 @@ void EQEditor::resized()
     auto r = getLocalBounds();
     r.removeFromTop (64);
     auto bottom = r.removeFromBottom (140);
+    sidePanel = r.removeFromRight (310).reduced (6, 8);
     graph = r.reduced (16, 8).toFloat();
-    graph.removeFromLeft (30);   // espacio para etiquetas dB
+    graph.removeFromLeft (30);   // etiquetas dB
     graph.removeFromBottom (18); // etiquetas de frecuencia
 
-    auto b = bottom.reduced (16, 6);
-    b.removeFromTop (16);
-    auto knob = [&b] (int w) { auto a = b.removeFromLeft (w); b.removeFromLeft (8); return a; };
+    // sliders de ganancia (derecha)
+    auto sp = sidePanel.reduced (8, 0);
+    sp.removeFromTop (44);
+    const int cw = sp.getWidth() / EQProcessor::maxBands;
+    for (int i = 0; i < EQProcessor::maxBands; ++i)
+        bandS[i].setBounds (sp.removeFromLeft (cw));
 
-    auto t = knob (150);
-    typeL.setBounds (t.removeFromTop (18).translated (0, -16));
-    typeBox.setBounds (t.removeFromTop (28).translated (0, 12));
-    addBtn.setBounds (t.withTrimmedTop (20).removeFromTop (26).translated (0, 8).withWidth (70));
-    delBtn.setBounds (addBtn.getBounds().translated (76, 0));
+    // controles inferiores
+    auto b2 = bottom.reduced (16, 6);
+    b2.removeFromTop (16);
+    auto knob = [&b2] (int w) { auto a = b2.removeFromLeft (w); b2.removeFromLeft (8); return a; };
 
-    for (const auto& pr : std::initializer_list<std::pair<Slider*, Label*>> { { &freqS, &freqL }, { &gainS, &gainL }, { &qS, &qL } })
+    auto t = knob (240);
+    const int tx = t.getX(), ty = t.getY();
+    typeL.setBounds  (tx, ty - 16, 116, 18);
+    typeBox.setBounds (tx, ty + 8, 116, 28);
+    slopeL.setBounds  (tx + 124, ty - 16, 116, 18);
+    slopeBox.setBounds (tx + 124, ty + 8, 116, 28);
+    addBtn.setBounds  (tx,       ty + 50, 74, 26);
+    delBtn.setBounds  (tx + 80,  ty + 50, 74, 26);
+    soloBtn.setBounds (tx + 160, ty + 50, 74, 26);
+
+    for (auto& pr : std::initializer_list<std::pair<Slider*, Label*>> { { &freqS, &freqL }, { &gainS, &gainL }, { &qS, &qL } })
     {
         auto a = knob (110);
         pr.second->setBounds (a.removeFromTop (16).translated (0, -16));
@@ -295,7 +356,7 @@ void EQEditor::drawSpectrum (Graphics& g)
     {
         float f0 = minF * std::pow (maxF / minF, (float) c / numCols);
         float f1 = minF * std::pow (maxF / minF, (float) (c + 1) / numCols);
-        float xa = freqToX (f1), xb = freqToX (f0);   // reversed axis
+        float xa = freqToX (f0), xb = freqToX (f1);
         float lv = levels[c];
         if (lv < 0.01f) continue;
 
@@ -321,8 +382,11 @@ void EQEditor::drawCurve (Graphics& g)
     {
         if (! isActive (i)) continue;
         auto n = String (i + 1);
-        cs.push_back (EQProcessor::makeCoeffs ((int) getParam ("t" + n), sr, getParam ("f" + n), getParam ("q" + n),
-                                               jlimit (-range(), range(), getParam ("g" + n))));
+        dsp::IIR::Coefficients<float>::Ptr tmp[EQProcessor::maxStages];
+        const int cnt = EQProcessor::makeStageCoeffs ((int) getParam ("t" + n), sr, getParam ("f" + n), getParam ("q" + n),
+                                                      jlimit (-range(), range(), getParam ("g" + n)),
+                                                      (int) getParam ("s" + n), tmp);
+        for (int k = 0; k < cnt; ++k) cs.push_back (tmp[k]);
     }
 
     Path line;
@@ -362,6 +426,11 @@ void EQEditor::drawNodes (Graphics& g)
 
         bool sel = (i == selected);
         auto c = Rectangle<float> (22.f, 22.f).withCentre ({ x, y });
+        if ((int) getParam ("solo") == i + 1)
+        {
+            g.setColour (Colours::white);
+            g.drawEllipse (c.expanded (9.f), 2.f);
+        }
         g.setColour (Pal::purple.withAlpha (sel ? 0.45f : 0.2f));
         g.fillEllipse (c.expanded (5.f));
         g.setColour (sel ? Colours::white : Pal::purple);
@@ -427,6 +496,26 @@ void EQEditor::paint (Graphics& g)
 
     g.setColour (Pal::deep);
     g.drawRoundedRectangle (graph, 6.f, 1.f);
+
+    // Panel de sliders de ganancia
+    g.setColour (Pal::panel);
+    g.fillRoundedRectangle (sidePanel.toFloat(), 6.f);
+    g.setColour (Pal::deep);
+    g.drawRoundedRectangle (sidePanel.toFloat(), 6.f, 1.f);
+    g.setColour (Pal::text);
+    g.setFont (FontOptions (12.f, Font::bold));
+    g.drawText ("GANANCIA POR BANDA", sidePanel.getX(), sidePanel.getY() + 4, sidePanel.getWidth(), 16, Justification::centred);
+    {
+        auto sp = sidePanel.reduced (8, 0);
+        sp.removeFromTop (44);
+        const int cw = sp.getWidth() / EQProcessor::maxBands;
+        for (int i = 0; i < EQProcessor::maxBands; ++i)
+        {
+            auto col = sp.removeFromLeft (cw);
+            g.setColour (i == selected ? Pal::purple : Pal::text.withAlpha (isActive (i) ? 0.9f : 0.35f));
+            g.drawText (String (i + 1), col.getX(), sidePanel.getY() + 24, cw, 18, Justification::centred);
+        }
+    }
 
     // Etiqueta de banda seleccionada
     g.setColour (Pal::purple);

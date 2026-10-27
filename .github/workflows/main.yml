@@ -42,8 +42,15 @@ jobs:
       - name: Crear instalador Windows (.exe)
         if: runner.os == 'Windows'
         run: |
-          choco install innosetup -y --no-progress
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\windows\ArcieriEQ.iss
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $vst = Join-Path $env:GITHUB_WORKSPACE "build\ArcieriEQ_artefacts\Release\VST3"
+          Get-ChildItem -Recurse $vst | Select-Object -First 30 FullName
+          $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
+          if (-not $iscc) { choco install innosetup -y --no-progress; $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" | Select-Object -First 1).FullName }
+          Write-Host "ISCC: $iscc"
+          & $iscc "/O$env:GITHUB_WORKSPACE\dist" "/DBuildDir=$vst" "installer\windows\ArcieriEQ.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Subir instalador
         uses: actions/upload-artifact@v4

@@ -44,13 +44,32 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $vst = Join-Path $env:GITHUB_WORKSPACE "build\ArcieriEQ_artefacts\Release\VST3"
-          Get-ChildItem -Recurse $vst | Select-Object -First 30 FullName
-          $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
-          if (-not $iscc) { $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
-          if (-not $iscc) { choco install innosetup -y --no-progress; $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" | Select-Object -First 1).FullName }
+          $iss = Join-Path $env:GITHUB_WORKSPACE "ArcieriEQ_installer.iss"
+          $out = Join-Path $env:GITHUB_WORKSPACE "dist"
+          @'
+          [Setup]
+          AppName=Arcieri EQ
+          AppVersion=1.0.0
+          AppPublisher=Arcieri
+          DefaultDirName={commonpf64}\Arcieri EQ
+          DisableDirPage=yes
+          DisableProgramGroupPage=yes
+          PrivilegesRequired=admin
+          ArchitecturesInstallIn64BitMode=x64compatible
+          OutputBaseFilename=ArcieriEQ-Installer-Windows
+          Compression=lzma
+          SolidCompression=yes
+
+          [Files]
+          Source: "{#BuildDir}\Arcieri EQ.vst3\*"; DestDir: "{commoncf64}\VST3\Arcieri EQ.vst3"; Flags: recursesubdirs createallsubdirs ignoreversion
+          '@ | Set-Content -Path $iss -Encoding ASCII
+          Get-Content $iss
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = (Get-Command ISCC.exe).Source }
           Write-Host "ISCC: $iscc"
-          & $iscc "/O$env:GITHUB_WORKSPACE\dist" "/DBuildDir=$vst" "installer\windows\ArcieriEQ.iss"
+          & $iscc "/O$out" "/DBuildDir=$vst" $iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem $out
 
       - name: Subir instalador
         uses: actions/upload-artifact@v4

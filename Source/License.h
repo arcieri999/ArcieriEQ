@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_core/juce_core.h>
+#include <juce_cryptography/juce_cryptography.h>
 
 // Sistema de licencias de Arcieri EQ.
 // Aqui solo vive la clave PUBLICA (sirve para verificar, no para crear licencias).

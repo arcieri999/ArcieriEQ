@@ -31,6 +31,7 @@ target_link_libraries(ArcieriEQ
         ArcieriEQAssets
         juce::juce_audio_utils
         juce::juce_dsp
+        juce::juce_cryptography
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
